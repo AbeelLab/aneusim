@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 import os
+import sys
 import logging
 import argparse
 from configparser import ConfigParser
 
 from skbio import io, DNA
 
-from aneugen.chromosome import simulate_translocate
+from aneugen import chromosome
 
 
 def list_records(args):
@@ -66,8 +67,9 @@ def translocate(args):
         raise ValueError("At least one of the chromosome data could not be "
                          "read.")
 
-    new1, new2 = simulate_translocate(chromosome1, chromosome2,
-                                      args.lengths[0], args.lengths[1])
+    new1, new2 = chromosome.simulate_translocate(chromosome1, chromosome2,
+                                                 args.lengths[0],
+                                                 args.lengths[1])
 
     if args.in_place:
         file1 = args.chromosome[0]
@@ -85,6 +87,19 @@ def translocate(args):
 
     with open(file2, 'w') as f:
         io.write(new2, format='fasta', into=f)
+
+
+def mutate(args):
+    filename = args.file.name
+    sequence = DNA.read(args.file, format='fasta', lowercase=True)
+    args.file.close()
+    sequence = chromosome.mutate(sequence, args.num)
+
+    if args.in_place:
+        with open(filename, 'w') as f:
+            io.write(sequence, format='fasta', into=f)
+    else:
+        io.write(sequence, format='fasta', into=args.output)
 
 
 def main():
@@ -141,10 +156,35 @@ def main():
              "respectively."
     )
     translocate_parser.add_argument(
-        '-i', '--in-place', type=bool, action="store_true", default=False,
+        '-i', '--in-place', action="store_true", default=False,
         help="Modify the chromosome fasta files in place. Otherwise output "
              "the modified chromosomes as new files in the same directory as "
              "the original files."
+    )
+
+    mutate_parser = subparsers.add_parser(
+        'mutate', help="Randomly add synthetic mutations to a chromosome."
+    )
+
+    mutate_parser.set_defaults(func=mutate)
+    mutate_parser.add_argument(
+        '-n', '--num', type=int, required=True,
+        help="Specify the number of mutations to generate."
+    )
+    mutate_parser.add_argument(
+        'file', type=argparse.FileType('r'), default=sys.stdin,
+        help="The FASTA file with the chromosome sequence to read. Defaults "
+             "to stdin."
+    )
+    mutate_parser.add_argument(
+        '-o', '--output', type=argparse.FileType('w'), default=sys.stdout,
+        required=False,
+        help="Output file of the new mutated chromosome, defaults to stdout."
+    )
+    mutate_parser.add_argument(
+        '-i', '--in-place', action="store_true", default=False,
+        help="Modify the file in place. Does not work if reading from stdin, "
+             "and supersedes the --output option."
     )
 
     args = parser.parse_args()
