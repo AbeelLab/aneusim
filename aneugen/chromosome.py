@@ -1,4 +1,6 @@
+import random
 from typing import Tuple
+
 from skbio import DNA
 
 
@@ -38,3 +40,24 @@ def simulate_translocate(chromosome1: DNA, chromosome2: DNA, length1: int,
                          "or 1".format(mode))
 
     return new_chromosome1, new_chromosome2
+
+
+def mutate(sequence: DNA, num: int) -> DNA:
+    """
+    Randomly mutate a given DNA sequence.
+
+    :param sequence: DNA sequence of the chromosome
+    :param num: Number of mutations to apply.
+    """
+
+    alphabet = {'A', 'C', 'T', 'G'}
+    new_sequence = sequence.copy(deep=True)
+
+    # Determine `num` random positions
+    for pos in random.sample(range(len(sequence)), num):
+        base = str(sequence[pos])
+
+        new_base = random.choice(list(alphabet - {base}))
+        new_sequence = new_sequence.replace([pos], new_base)
+
+    return new_sequence
