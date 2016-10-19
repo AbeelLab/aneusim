@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-import sys
+import os
+import logging
 import argparse
+from configparser import ConfigParser
 
 from skbio import io, DNA
 
@@ -13,33 +15,52 @@ def list_records(args):
               seq.metadata['description'])
 
 
-def copy(args):
-    pass
+def contigize(args):
+    if not os.path.isdir(args.output_dir):
+        raise FileNotFoundError("{} is not an existing directory.".format(
+            args.output_dir
+        ))
+
+    copy_num_spec = ConfigParser()
+    copy_num_spec.read_file(args.spec_file)
+
+    copy_numbers = copy_num_spec['chromosomes']
+
+    for seq in io.read(args.input, format='fasta'):
+        if seq.metadata['id'] in copy_numbers:
+            try:
+                copy_number = int(copy_numbers[seq.metadata['id']])
+            except ValueError:
+                logging.error("Invalid copy number value '{}' for chromosome "
+                              "'{}'".format(copy_numbers[seq.metadata['id']],
+                                            seq.metadata['id']))
+                copy_number = 1
+        else:
+            logging.warning('No copy number specification found for '
+                            'chromosome {}. Assuming a single copy.'.format(
+                                seq.metadata['id']))
+            copy_number = 1
+
+        for i in range(copy_number):
+            output_path = os.path.join(
+                args.output_dir,
+                "{}.copy{}.fasta".format(seq.metadata['id'], i)
+            )
+
+            with open(output_path, 'w') as f:
+                io.write(seq, format='fasta', into=f)
 
 
 def translocate(args):
     chromosome1 = None
     chromosome2 = None
 
-    if args.input:
-        # Chromosomes are individual records in a single FASTA file
-        for seq in io.read(args.input, 'fasta', lowercase=True):
-            seq = DNA(seq)
-            if seq.metadata['id'] == args.chromosome[0]:
-                chromosome1 = seq
+    # Chromosomes each in their own file
+    with open(args.chromosome[0]) as f:
+        chromosome1 = DNA.read(f, format='fasta', lowercase=True)
 
-            if seq.metadata['id'] == args.chromosome[1]:
-                chromosome2 = seq
-
-            if chromosome1 and chromosome2:
-                break
-    else:
-        # Chromosomes each in their own file
-        with open(args.chromosome[0]) as f:
-            chromosome1 = DNA.read(f, format='fasta', lowercase=True)
-
-        with open(args.chromosome[1]) as f:
-            chromosome2 = DNA.read(f, format='fasta', lowercase=True)
+    with open(args.chromosome[1]) as f:
+        chromosome2 = DNA.read(f, format='fasta', lowercase=True)
 
     if not chromosome1 or not chromosome2:
         raise ValueError("At least one of the chromosome data could not be "
@@ -48,8 +69,22 @@ def translocate(args):
     new1, new2 = simulate_translocate(chromosome1, chromosome2,
                                       args.lengths[0], args.lengths[1])
 
-    io.write(new1, format='fasta', into=args.output)
-    io.write(new2, format='fasta', into=args.output)
+    if args.in_place:
+        file1 = args.chromosome[0]
+        file2 = args.chromosome[1]
+    else:
+        ext_pos = args.chromosome[0].rfind('.')
+        file1 = "{}.translocated{}".format(
+            args.chromosome[0][:ext_pos], args.chromosome[0][ext_pos:])
+        ext_pos = args.chromosome[1].rfind('.')
+        file2 = "{}.translocated{}".format(
+            args.chromosome[1][:ext_pos], args.chromosome[1][ext_pos:])
+
+    with open(file1, 'w') as f:
+        io.write(new1, format='fasta', into=f)
+
+    with open(file2, 'w') as f:
+        io.write(new2, format='fasta', into=f)
 
 
 def main():
@@ -69,24 +104,26 @@ def main():
         help="The FASTA file to read"
     )
 
-    copy_parser = subparsers.add_parser(
-        'copy', help="Copy a specified chromosome and possibly add synthetic "
-                     "SNP's"
+    contigize_parser = subparsers.add_parser(
+        'contigize',
+        help="Generate individual FASTA files for each chromosome haplotype."
     )
 
-    copy_parser.set_defaults(func=copy)
-    copy_parser.add_argument(
+    contigize_parser.set_defaults(func=contigize)
+    contigize_parser.add_argument(
         '-i', '--input', type=argparse.FileType('r'), required=True,
         help="Base genome as FASTA file. "
              "Each record should represent a chromosome."
     )
-    copy_parser.add_argument(
-        '-c', '--chromosome', required=True,
-        help="Specify the FASTA record ID of the chromosome to copy"
+    contigize_parser.add_argument(
+        '-s', '--spec-file', type=argparse.FileType('r'), required=True,
+        help="Copy number specification for each chromosome, formatted as an "
+             "INI file."
     )
-    copy_parser.add_argument(
-        '-s', '--snp', type=float, required=False, metavar='NUM',
-        help="Generate NUM random SNP's in the new chromosome copy."
+    contigize_parser.add_argument(
+        'output_dir',
+        help="Specify the output directory where all FASTA files will be "
+             "stored."
     )
 
     translocate_parser = subparsers.add_parser(
@@ -96,24 +133,18 @@ def main():
     translocate_parser.set_defaults(func=translocate)
     translocate_parser.add_argument(
         'chromosome', nargs=2, metavar='chromosome',
-        help="Specify the two chromosomes either as files or FASTA ID's, "
-             "depening on wether the -i flag is used."
-    )
-    translocate_parser.add_argument(
-        '-i', '--input', type=argparse.FileType('r'), required=False,
-        metavar='FASTA_FILE',
-        help="Base genome as FASTA file. "
-             "Each record should represent a chromosome."
-    )
-    translocate_parser.add_argument(
-        '-o', '--output', type=argparse.FileType('a'), default=sys.stdout,
-        metavar='FILE',
-        help="Specify the output file. Defaults to stdout."
+        help="Specify the two chromosomes as separate FASTA files."
     )
     translocate_parser.add_argument(
         '-l', '--lengths', nargs=2, metavar='LEN', required=True, type=int,
         help="Number of basepairs translocated for chromosome 1 and 2 "
              "respectively."
+    )
+    translocate_parser.add_argument(
+        '-i', '--in-place', type=bool, action="store_true", default=False,
+        help="Modify the chromosome fasta files in place. Otherwise output "
+             "the modified chromosomes as new files in the same directory as "
+             "the original files."
     )
 
     args = parser.parse_args()
