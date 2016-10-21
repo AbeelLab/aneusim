@@ -130,7 +130,7 @@ def translocate(args):
         raise ValueError("At least one of the chromosome data could not be "
                          "read.")
 
-    new1, new2 = sequence.simulate_translocate(chromosome1, chromosome2,
+    new1, new2 = simulate_translocate(chromosome1, chromosome2,
                                                args.lengths[0],
                                                args.lengths[1])
 
@@ -156,7 +156,7 @@ def mutate(args):
     filename = args.file.name
     sequence = DNA.read(args.file, format='fasta', lowercase=True)
     args.file.close()
-    sequence = sequence.mutate(sequence, args.num)
+    sequence = add_mutations(sequence, args.num)
 
     if args.in_place:
         with open(filename, 'w') as f:
