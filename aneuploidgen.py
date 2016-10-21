@@ -9,8 +9,6 @@ from typing import Tuple
 
 from skbio import io, DNA
 
-from aneugen import sequence
-
 
 def simulate_translocate(chromosome1: DNA, chromosome2: DNA, length1: int,
                          length2: int, mode: int=0) -> Tuple[DNA, DNA]:
@@ -50,7 +48,7 @@ def simulate_translocate(chromosome1: DNA, chromosome2: DNA, length1: int,
     return new_chromosome1, new_chromosome2
 
 
-def mutate(sequence: DNA, num: int) -> DNA:
+def add_mutations(sequence: DNA, num: int) -> DNA:
     """
     Randomly mutate a given DNA sequence.
 
@@ -231,7 +229,7 @@ def main():
         'mutate', help="Randomly add synthetic mutations to a chromosome."
     )
 
-    mutate_parser.set_defaults(func=mutate)
+    mutate_parser.set_defaults(func=add_mutations)
     mutate_parser.add_argument(
         '-n', '--num', type=int, required=True,
         help="Specify the number of mutations to generate."
