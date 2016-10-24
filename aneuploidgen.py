@@ -91,25 +91,28 @@ def contigize(args):
     copy_numbers = copy_num_spec['chromosomes']
 
     for seq in io.read(args.input, format='fasta'):
-        if seq.metadata['id'] in copy_numbers:
+        chromosome_id = seq.metadata['id']
+        if chromosome_id in copy_numbers:
             try:
-                copy_number = int(copy_numbers[seq.metadata['id']])
+                copy_number = int(copy_numbers[chromosome_id])
             except ValueError:
                 logging.error("Invalid copy number value '{}' for chromosome "
-                              "'{}'".format(copy_numbers[seq.metadata['id']],
-                                            seq.metadata['id']))
+                              "'{}'".format(copy_numbers[chromosome_id],
+                                            chromosome_id))
                 copy_number = 1
         else:
             logging.warning('No copy number specification found for '
                             'chromosome {}. Assuming a single copy.'.format(
-                                seq.metadata['id']))
+                                chromosome_id))
             copy_number = 1
 
         for i in range(copy_number):
             output_path = os.path.join(
                 args.output_dir,
-                "{}.copy{}.fasta".format(seq.metadata['id'], i)
+                "{}.copy{}.fasta".format(chromosome_id, i)
             )
+
+            seq.metadata['id'] = "{}.copy{}".format(chromosome_id, i)
 
             with open(output_path, 'w') as f:
                 io.write(seq, format='fasta', into=f)
