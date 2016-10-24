@@ -229,7 +229,7 @@ def main():
         'mutate', help="Randomly add synthetic mutations to a chromosome."
     )
 
-    mutate_parser.set_defaults(func=add_mutations)
+    mutate_parser.set_defaults(func=mutate)
     mutate_parser.add_argument(
         '-n', '--num', type=int, required=True,
         help="Specify the number of mutations to generate."
