@@ -1,7 +1,7 @@
 import pytest
 
 from skbio import DNA
-from aneuploidgen import simulate_translocate, add_mutations
+from aneugen.chromosomes import simulate_translocate, add_mutations
 
 
 def test_translocation():

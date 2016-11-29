@@ -1,9 +1,9 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='aneuploidgen',
-    version='0.1.2',
-    py_modules=['aneuploidgen'],
+    version='0.2.0',
+    packages=find_packages(),
 
     # Metadata
     description='Helper script to generate synthetic aneuploid genomes.',
@@ -14,7 +14,8 @@ setup(
 
     # Dependencies
     install_requires=[
-        'scikit-bio>=0.5.0'
+        'scikit-bio>=0.5.0',
+        'pybedtools>=0.7'
     ],
     setup_requires=['pytest-runner'],
     tests_require=[
