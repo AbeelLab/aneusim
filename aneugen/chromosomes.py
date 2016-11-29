@@ -18,7 +18,8 @@ ChromosomeMeta = NamedTuple('ChromosomeMeta', [
 ])
 
 
-def get_chromosome_metadata(bt: pybedtools.BedTool, chromosome_id: str) -> Dict:
+def get_chromosome_metadata(bt: pybedtools.BedTool,
+                            chromosome_id: str) -> ChromosomeMeta:
     """
     Retrieves chromosome name, length and centromere metadata from a
     BedTool object.
