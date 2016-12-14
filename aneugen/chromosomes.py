@@ -1,6 +1,8 @@
 import random
-from typing import List, NamedTuple, Dict, Tuple
+from typing import List, NamedTuple, Tuple
+from collections.abc import Sequence
 
+import numpy
 import pybedtools
 from skbio import DNA
 
@@ -9,7 +11,7 @@ Annotation = NamedTuple('Annotation', [
 ])
 
 CentromereMeta = NamedTuple('CentromereMeta', [
-    ('start', int), ('length', int)
+    ('start', int), ('len', int)
 ])
 
 ChromosomeMeta = NamedTuple('ChromosomeMeta', [
@@ -23,8 +25,6 @@ def get_chromosome_metadata(bt: pybedtools.BedTool,
     """
     Retrieves chromosome name, length and centromere metadata from a
     BedTool object.
-
-    The output dict can be exported to JSON to be used with Ideogram.js.
     """
     output = {
         'accession': chromosome_id,
@@ -41,7 +41,7 @@ def get_chromosome_metadata(bt: pybedtools.BedTool,
             output['length'] = len(feat)
             output['name'] = feat.attrs['Name']
             output['type'] = ('nuclear' if feat.attrs['genome'] ==
-                                           'chromosome' else 'mitochondrial')
+                              'chromosome' else 'mitochondrial')
         elif feat[2] == 'centromere':
             if 'Dbxref' in feat.attrs:
                 output['centromere'] = CentromereMeta(feat.start, len(feat))
@@ -81,9 +81,23 @@ def simulate_translocate(chromosome1: DNA, chromosome2: DNA, length1: int,
                                       chromosome1[length1:]])
         new_chromosome2 = DNA.concat([chromosome1[:length1],
                                       chromosome2[length2:]])
+    elif mode == 2:
+        # Get a suffix from chromosome 1, reverse it, and concatenate it
+        # with a suffix of chromosome 2
+        new_chromosome1 = DNA.concat([
+            chromosome1[-length1:].reverse_complement(),
+            chromosome2[length2:]
+        ])
+
+        # Get a prefix of chromosome 1, and concatenate it with a reversed
+        # prefix of chromosome 2
+        new_chromosome2 = DNA.concat([
+            chromosome1[:-length1],
+            chromosome2[:length2].reverse_complement()
+        ])
     else:
-        raise ValueError("Invalid mode '{}' specified. Possible values are 0 "
-                         "or 1".format(mode))
+        raise ValueError("Invalid mode '{}' specified. Possible values are 0, "
+                         "1 or 2".format(mode))
 
     return new_chromosome1, new_chromosome2
 
@@ -107,3 +121,36 @@ def add_mutations(sequence: DNA, num: int) -> DNA:
         new_sequence = new_sequence.replace([pos], new_base)
 
     return new_sequence
+
+
+def generate_deletions(sequence: DNA, num: int, mu: int=20, std: float=6.0):
+    i = 0
+    new_sequence = sequence.copy(deep=True)
+
+    while i < num:
+        size = int(round(numpy.random.normal(mu, std)))
+        pos = random.randint(0, len(new_sequence) - size)
+
+        new_sequence = DNA.concat([new_sequence[:pos],
+                                   new_sequence[pos+size:]])
+        i += 1
+
+    return new_sequence
+
+
+def find_ty_element_location(annotations: pybedtools.BedTool, start_end=None):
+    start, end = -1, -1
+
+    if isinstance(start_end, Sequence):
+        start, end = start_end
+    elif isinstance(start_end, int):
+        start = -1
+        end = start_end
+
+    if start > 0:
+        annotations = annotations.filter(lambda f: f.start >= start)
+
+    if end > 0:
+        annotations = annotations.filter(lambda f: f.stop <= end)
+
+    return annotations.filter(lambda f: f[2] == 'mobile_genetic_element')

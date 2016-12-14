@@ -6,8 +6,10 @@ import sys
 from configparser import ConfigParser
 
 from skbio import io, DNA
+from pybedtools import BedTool, Interval
 
-from aneugen.chromosomes import simulate_translocate, add_mutations
+from aneugen.chromosomes import (simulate_translocate, add_mutations,
+                                 generate_deletions, find_ty_element_location)
 
 
 #
@@ -20,7 +22,9 @@ def list_records(args):
               seq.metadata['description'])
 
 
-def contigize(args):
+def haplotise(args):
+    """Generate separate FASTA files for each chromosome copy."""
+
     if not os.path.isdir(args.output_dir):
         raise FileNotFoundError("{} is not an existing directory.".format(
             args.output_dir
@@ -60,6 +64,13 @@ def contigize(args):
 
 
 def translocate(args):
+
+    if not args.lengths and not args.pos:
+        raise argparse.ArgumentError(
+            'lengths', "Neither translocation lengths or break positions "
+                       "given."
+        )
+
     chromosome1 = None
     chromosome2 = None
 
@@ -74,8 +85,24 @@ def translocate(args):
         raise ValueError("At least one of the chromosome data could not be "
                          "read.")
 
+    if args.lengths:
+        lengths = args.lengths
+    else:
+        lengths = [-1, -1]
+
+    if args.pos:
+        if args.mode == 0:
+            lengths[0] = len(chromosome1) - args.pos[0]
+            lengths[1] = len(chromosome2) - args.pos[1]
+        elif args.mode == 1:
+            lengths[0] = args.pos[0]
+            lengths[1] = args.pos[1]
+        elif args.mode == 2:
+            lengths[0] = len(chromosome1) - args.pos[0]
+            lengths[1] = args.pos[1]
+
     new1, new2 = simulate_translocate(chromosome1, chromosome2,
-                                      args.lengths[0], args.lengths[1])
+                                      lengths[0], lengths[1])
 
     if args.in_place:
         file1 = args.chromosome[0]
@@ -108,6 +135,29 @@ def mutate(args):
         io.write(sequence, format='fasta', into=args.output)
 
 
+def deletions(args):
+    filename = args.file.name
+    sequence = DNA.read(args.file, format='fasta', lowercase=True)
+    args.file.close()
+    sequence = generate_deletions(sequence, args.num, args.mu, args.sigma)
+
+    if args.in_place:
+        with open(filename, 'w') as f:
+            io.write(sequence, format='fasta', into=f)
+    else:
+        io.write(sequence, format='fasta', into=args.output)
+
+
+def find_ty_elems(args):
+    annotations = BedTool(args.annotations_file).filter(
+        lambda f: f[0] == args.chromosome
+    )
+
+    ty_elements = find_ty_element_location(annotations, (args.start, args.end))
+    for interval in ty_elements:
+        print(interval.start, interval.end)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="A script to help generate synthetic aneuploid genomes."
@@ -125,23 +175,23 @@ def main():
         help="The FASTA file to read"
     )
 
-    contigize_parser = subparsers.add_parser(
-        'contigize',
+    haplotise_parser = subparsers.add_parser(
+        'haplotise',
         help="Generate individual FASTA files for each chromosome haplotype."
     )
 
-    contigize_parser.set_defaults(func=contigize)
-    contigize_parser.add_argument(
+    haplotise_parser.set_defaults(func=haplotise)
+    haplotise_parser.add_argument(
         '-i', '--input', type=argparse.FileType('r'), required=True,
         help="Base genome as FASTA file. "
              "Each record should represent a chromosome."
     )
-    contigize_parser.add_argument(
+    haplotise_parser.add_argument(
         '-s', '--spec-file', type=argparse.FileType('r'), required=True,
         help="Copy number specification for each chromosome, formatted as an "
              "INI file."
     )
-    contigize_parser.add_argument(
+    haplotise_parser.add_argument(
         'output_dir',
         help="Specify the output directory where all FASTA files will be "
              "stored."
@@ -157,9 +207,18 @@ def main():
         help="Specify the two chromosomes as separate FASTA files."
     )
     translocate_parser.add_argument(
-        '-l', '--lengths', nargs=2, metavar='LEN', required=True, type=int,
+        '-m', '--mode', choices=(0, 1, 2), default=0, type=int,
+        help="Choose translocation mode."
+    )
+    translocate_parser.add_argument(
+        '-l', '--lengths', nargs=2, metavar='LEN', type=int,
         help="Number of basepairs translocated for chromosome 1 and 2 "
              "respectively."
+    )
+    translocate_parser.add_argument(
+        '-p', '--pos', nargs=2, type=int,
+        help="Breaking positions for chromosome 1 and 2. Overrides the "
+             "--lengths option."
     )
     translocate_parser.add_argument(
         '-i', '--in-place', action="store_true", default=False,
@@ -191,6 +250,61 @@ def main():
         '-i', '--in-place', action="store_true", default=False,
         help="Modify the file in place. Does not work if reading from stdin, "
              "and supersedes the --output option."
+    )
+
+    deletions_parser = subparsers.add_parser(
+        'deletions', help="Randomly generate deletions throughout the genome."
+    )
+
+    deletions_parser.set_defaults(func=deletions)
+    deletions_parser.add_argument(
+        '-u', '--mu', type=int, default=20,
+        help="Mean size of a deletion. Defaults to 20."
+    )
+    deletions_parser.add_argument(
+        '-s', '--sigma', type=float, default=6.0,
+        help="Standard deviation of the size of a deletion. Defaults to 6"
+    )
+    deletions_parser.add_argument(
+        '-n', '--num', type=int, required=True,
+        help="Total number of deletions to generate."
+    )
+    deletions_parser.add_argument(
+        'file', type=argparse.FileType('r'), default=sys.stdin,
+        help="The FASTA file with the chromosome sequence to read. Defaults "
+             "to stdin."
+    )
+    deletions_parser.add_argument(
+        '-o', '--output', type=argparse.FileType('w'), default=sys.stdout,
+        required=False,
+        help="Output file of the new mutated chromosome, defaults to stdout."
+    )
+    deletions_parser.add_argument(
+        '-i', '--in-place', action="store_true", default=False,
+        help="Modify the file in place. Does not work if reading from stdin, "
+             "and supersedes the --output option."
+    )
+
+    find_tyelems_parser = subparsers.add_parser(
+        'find_tyelems', help="Find the positions of Ty-elements in an "
+                            "chromosome."
+    )
+
+    find_tyelems_parser.set_defaults(func=find_ty_elems)
+    find_tyelems_parser.add_argument(
+        'annotations_file', help="BED or GFF file with genome annotations."
+    )
+    find_tyelems_parser.add_argument(
+        'chromosome', help="Specify chromosome ID"
+    )
+    find_tyelems_parser.add_argument(
+        '-s', '--start', type=int, default=-1,
+        help="Start position of the range to search in",
+
+    )
+    find_tyelems_parser.add_argument(
+        '-e', '--end', type=int, default=-1,
+        help="End position of the range to search in",
     )
 
     args = parser.parse_args()
