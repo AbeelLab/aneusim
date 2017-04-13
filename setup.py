@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='aneuploidgen',
-    version='0.2.2',
+    version='0.3.0',
     packages=find_packages(),
 
     # Metadata
@@ -14,7 +14,8 @@ setup(
 
     # Dependencies
     install_requires=[
-        'scikit-bio>=0.5.0',
+        'scipy',
+        'dinopy>=0.2',
         'pybedtools>=0.7'
     ],
     setup_requires=['pytest-runner'],
