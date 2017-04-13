@@ -10,6 +10,8 @@ from pybedtools import BedTool
 
 from aneugen.chromosomes import (simulate_translocate, add_mutations,
                                  generate_deletions, find_ty_element_location)
+from aneugen.reads import (ReadLengthDistribution, generate_reads,
+                           read_reference)
 
 
 #
@@ -161,6 +163,33 @@ def find_ty_elems(args):
         print(interval.start, interval.end)
 
 
+def reads(args):
+    if not args.coverage and not args.num:
+        print("No number of reads given.")
+        return
+
+    chromosomes = read_reference(args.input_genome)
+    total_length = sum(c.length for c in chromosomes)
+
+    dist = ReadLengthDistribution(*args.lognorm_params)
+    num = args.num
+    if args.coverage:
+        num = dist.num_reads_for_coverage(args.coverage, total_length)
+        print(num, "reads required for coverage of", args.coverage,
+              file=sys.stderr)
+
+    with FastaWriter(args.output, force_overwrite=True) as fw:
+        for i, read_data in enumerate(generate_reads(chromosomes, dist, num,
+                                                     args.min_length)):
+            read, chromosome_name, start_pos = read_data
+            chromosome_id = chromosome_name.decode('utf-8').split()[0]
+
+            read_name = "read{} chromsosome={} pos={} length={}".format(
+                i, chromosome_id, start_pos, len(read))
+
+            fw.write_entry((read, read_name.encode('utf-8')))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="A script to help generate synthetic aneuploid genomes."
@@ -308,6 +337,42 @@ def main():
     find_tyelems_parser.add_argument(
         '-e', '--end', type=int, default=-1,
         help="End position of the range to search in",
+    )
+
+    reads_parser = subparsers.add_parser(
+        'reads', help="Simulate a long-read sequencing experiment, and "
+                      "generate a set of reads sampled from the genome."
+                      " This read simulator does not contain an error model."
+    )
+
+    reads_parser.set_defaults(func=reads)
+    reads_parser.add_argument(
+        '-l', '--lognorm-params', type=float,
+        default=(0.2001, -10075.4364, 17922.611), nargs=3,
+        help="log-normal distribution parameters to sample read lengths from "
+             " (sigma, loc, scale)."
+    )
+    reads_parser.add_argument(
+        '-n', '--num', type=int, required=False,
+        help="Give the number of reads to generate."
+    )
+    reads_parser.add_argument(
+        '-c', '--coverage', type=int, required=False,
+        help="Automatically calculate the number of reads to generate to "
+             "ensure the given coverage across the genome. Overrides the "
+             "parameter -n/--num"
+    )
+    reads_parser.add_argument(
+        '-m', '--min-length', type=int, default=100,
+        help="Minimum read length. Defaults to 100."
+    )
+    reads_parser.add_argument(
+        '-o', '--output', type=argparse.FileType('wb'), default=sys.stdout,
+        help="The filename to store the reads in. Defaults to stdout."
+    )
+    reads_parser.add_argument(
+        'input_genome', type=argparse.FileType('rb'), default=sys.stdin,
+        help="The reference genome to sample reads from."
     )
 
     args = parser.parse_args()

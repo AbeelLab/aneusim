@@ -1,4 +1,4 @@
 pytest
 numpy>=0.10
-scikit-bio>=0.5
 pybedtools>=0.7
+dinopy>=1.2
