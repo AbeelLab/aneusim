@@ -20,8 +20,15 @@ from aneugen.reads import (ReadLengthDistribution, generate_reads,
 #
 def list_records(args):
     fr = FastaReader(args.input)
+    total_length = 0
     for c in fr.entries():
         print('ID:', c.name, 'Length:', c.length)
+        total_length += c.length
+
+    print("Total length:")
+    print(total_length, "bp")
+    print(total_length/1000, "kbp")
+    print(total_length/1000/1000, "Mbp")
 
 
 def haplotise(args):
