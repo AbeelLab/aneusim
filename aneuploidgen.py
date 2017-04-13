@@ -5,8 +5,8 @@ import os
 import sys
 from configparser import ConfigParser
 
-from skbio import io, DNA
-from pybedtools import BedTool, Interval
+from dinopy import FastaReader, FastaWriter
+from pybedtools import BedTool
 
 from aneugen.chromosomes import (simulate_translocate, add_mutations,
                                  generate_deletions, find_ty_element_location)
@@ -17,38 +17,40 @@ from aneugen.chromosomes import (simulate_translocate, add_mutations,
 # --------------------------------------
 #
 def list_records(args):
-    for seq in io.read(args.input, format='fasta'):
-        print('ID:', seq.metadata['id'], 'Description:',
-              seq.metadata['description'])
+    fr = FastaReader(args.input)
+    for c in fr.entries():
+        print('ID:', c.name, 'Length:', c.length)
 
 
 def haplotise(args):
     """Generate separate FASTA files for each chromosome copy."""
 
     if not os.path.isdir(args.output_dir):
-        raise FileNotFoundError("{} is not an existing directory.".format(
-            args.output_dir
-        ))
+        os.makedirs(args.output_dir, exists_ok=True)
 
     copy_num_spec = ConfigParser()
     copy_num_spec.read_file(args.spec_file)
 
     copy_numbers = copy_num_spec['chromosomes']
 
-    for seq in io.read(args.input, format='fasta'):
-        chromosome_id = seq.metadata['id']
+    fr = FastaReader(args.input)
+    for c in fr.entries():
+        parts = c.name.decode('utf-8').split()
+        chromosome_id = parts[0]
         if chromosome_id in copy_numbers:
             try:
                 copy_number = int(copy_numbers[chromosome_id])
             except ValueError:
-                logging.error("Invalid copy number value '{}' for chromosome "
-                              "'{}'".format(copy_numbers[chromosome_id],
-                                            chromosome_id))
+                logging.error(
+                    "Invalid copy number value '{}' for chromosome "
+                    "'{}'".format(copy_numbers[chromosome_id], chromosome_id)
+                )
                 copy_number = 1
         else:
-            logging.warning('No copy number specification found for '
-                            'chromosome {}. Assuming a single copy.'.format(
-                                chromosome_id))
+            logging.warning(
+                'No copy number specification found for '
+                'chromosome {}. Assuming a single copy.'.format(chromosome_id)
+            )
             copy_number = 1
 
         for i in range(copy_number):
@@ -57,14 +59,14 @@ def haplotise(args):
                 "{}.copy{}.fasta".format(chromosome_id, i)
             )
 
-            seq.metadata['id'] = "{}.copy{}".format(chromosome_id, i)
+            copy_name = "{}.copy{} {}".format(chromosome_id, i,
+                                              " ".join(parts[1:]))
 
-            with open(output_path, 'w') as f:
-                io.write(seq, format='fasta', into=f)
+            with FastaWriter(output_path, force_overwrite=True) as fw:
+                fw.write_chromosome((c.sequence, copy_name.encode('utf-8')))
 
 
 def translocate(args):
-
     if not args.lengths and not args.pos:
         raise argparse.ArgumentError(
             'lengths', "Neither translocation lengths or break positions "
@@ -75,11 +77,11 @@ def translocate(args):
     chromosome2 = None
 
     # Chromosomes each in their own file
-    with open(args.chromosome[0]) as f:
-        chromosome1 = DNA.read(f, format='fasta', lowercase=True)
+    f = FastaReader(args.chromosome[0])
+    chromosome1 = next(f.entries())
 
-    with open(args.chromosome[1]) as f:
-        chromosome2 = DNA.read(f, format='fasta', lowercase=True)
+    f = FastaReader(args.chromosome[1])
+    chromosome2 = next(f.entries())
 
     if not chromosome1 or not chromosome2:
         raise ValueError("At least one of the chromosome data could not be "
@@ -92,17 +94,17 @@ def translocate(args):
 
     if args.pos:
         if args.mode == 0:
-            lengths[0] = len(chromosome1) - args.pos[0]
-            lengths[1] = len(chromosome2) - args.pos[1]
+            lengths[0] = chromosome1.length - args.pos[0]
+            lengths[1] = chromosome2.length - args.pos[1]
         elif args.mode == 1:
             lengths[0] = args.pos[0]
             lengths[1] = args.pos[1]
         elif args.mode == 2:
-            lengths[0] = len(chromosome1) - args.pos[0]
+            lengths[0] = chromosome1.length - args.pos[0]
             lengths[1] = args.pos[1]
 
-    new1, new2 = simulate_translocate(chromosome1, chromosome2,
-                                      lengths[0], lengths[1])
+    new1, new2 = simulate_translocate(
+        chromosome1.sequence, chromosome2.sequence, lengths[0], lengths[1])
 
     if args.in_place:
         file1 = args.chromosome[0]
@@ -115,37 +117,38 @@ def translocate(args):
         file2 = "{}.translocated{}".format(
             args.chromosome[1][:ext_pos], args.chromosome[1][ext_pos:])
 
-    with open(file1, 'w') as f:
-        io.write(new1, format='fasta', into=f)
+    with FastaWriter(file1, force_overwrite=True) as fw:
+        fw.write_chromosome((new1, chromosome1.name))
 
-    with open(file2, 'w') as f:
-        io.write(new2, format='fasta', into=f)
+    with FastaWriter(file2, force_overwrite=True) as fw:
+        fw.write_chromosome((new2, chromosome2.name))
 
 
 def mutate(args):
     filename = args.file.name
-    sequence = DNA.read(args.file, format='fasta', lowercase=True)
+    fr = FastaReader(args.file)
+    entry = next(fr.entries(dtype=bytearray))
+    new_sequence = add_mutations(entry.sequence, args.num)
     args.file.close()
-    sequence = add_mutations(sequence, args.num)
 
-    if args.in_place:
-        with open(filename, 'w') as f:
-            io.write(sequence, format='fasta', into=f)
-    else:
-        io.write(sequence, format='fasta', into=args.output)
+    into_file = filename if args.in_place else args.output
+    with FastaWriter(into_file, force_overwrite=True) as fw:
+        fw.write_chromosome((new_sequence, entry.name), dtype=bytearray)
 
 
 def deletions(args):
     filename = args.file.name
-    sequence = DNA.read(args.file, format='fasta', lowercase=True)
-    args.file.close()
-    sequence = generate_deletions(sequence, args.num, args.mu, args.sigma)
 
-    if args.in_place:
-        with open(filename, 'w') as f:
-            io.write(sequence, format='fasta', into=f)
-    else:
-        io.write(sequence, format='fasta', into=args.output)
+    fr = FastaReader(args.file)
+    entry = next(fr.entries())
+    args.file.close()
+
+    sequence = generate_deletions(entry.sequence, args.num, args.mu,
+                                  args.sigma)
+
+    out_file = filename if args.in_place else args.output
+    with FastaWriter(out_file, force_overwrite=True) as fw:
+        fw.write_chromosome((sequence, entry.name))
 
 
 def find_ty_elems(args):
@@ -171,7 +174,7 @@ def main():
 
     list_parser.set_defaults(func=list_records)
     list_parser.add_argument(
-        '-i', '--input', type=argparse.FileType('r'), required=True,
+        '-i', '--input', type=argparse.FileType('rb'), required=True,
         help="The FASTA file to read"
     )
 
@@ -182,7 +185,7 @@ def main():
 
     haplotise_parser.set_defaults(func=haplotise)
     haplotise_parser.add_argument(
-        '-i', '--input', type=argparse.FileType('r'), required=True,
+        '-i', '--input', type=argparse.FileType('rb'), required=True,
         help="Base genome as FASTA file. "
              "Each record should represent a chromosome."
     )
@@ -237,12 +240,12 @@ def main():
         help="Specify the number of mutations to generate."
     )
     mutate_parser.add_argument(
-        'file', type=argparse.FileType('r'), default=sys.stdin,
+        'file', type=argparse.FileType('rb'), default=sys.stdin,
         help="The FASTA file with the chromosome sequence to read. Defaults "
              "to stdin."
     )
     mutate_parser.add_argument(
-        '-o', '--output', type=argparse.FileType('w'), default=sys.stdout,
+        '-o', '--output', type=argparse.FileType('wb'), default=sys.stdout,
         required=False,
         help="Output file of the new mutated chromosome, defaults to stdout."
     )
@@ -270,12 +273,12 @@ def main():
         help="Total number of deletions to generate."
     )
     deletions_parser.add_argument(
-        'file', type=argparse.FileType('r'), default=sys.stdin,
+        'file', type=argparse.FileType('rb'), default=sys.stdin,
         help="The FASTA file with the chromosome sequence to read. Defaults "
              "to stdin."
     )
     deletions_parser.add_argument(
-        '-o', '--output', type=argparse.FileType('w'), default=sys.stdout,
+        '-o', '--output', type=argparse.FileType('wb'), default=sys.stdout,
         required=False,
         help="Output file of the new mutated chromosome, defaults to stdout."
     )
@@ -287,7 +290,7 @@ def main():
 
     find_tyelems_parser = subparsers.add_parser(
         'find_tyelems', help="Find the positions of Ty-elements in an "
-                            "chromosome."
+                             "chromosome."
     )
 
     find_tyelems_parser.set_defaults(func=find_ty_elems)
@@ -309,6 +312,7 @@ def main():
 
     args = parser.parse_args()
     args.func(args)
+
 
 if __name__ == '__main__':
     main()

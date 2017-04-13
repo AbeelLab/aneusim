@@ -1,57 +1,14 @@
 import random
-from typing import List, NamedTuple, Tuple
+from typing import Tuple
 from collections.abc import Sequence
 
 import numpy
 import pybedtools
-from skbio import DNA
-
-Annotation = NamedTuple('Annotation', [
-    ('name', str), ('start', int), ('length', int), ('trackIndex', 0)
-])
-
-CentromereMeta = NamedTuple('CentromereMeta', [
-    ('start', int), ('len', int)
-])
-
-ChromosomeMeta = NamedTuple('ChromosomeMeta', [
-    ('name', str), ('type', str), ('accession', str),
-    ('centromere', CentromereMeta), ('annots', List[Annotation])
-])
+from dinopy import reverse_complement
 
 
-def get_chromosome_metadata(bt: pybedtools.BedTool,
-                            chromosome_id: str) -> ChromosomeMeta:
-    """
-    Retrieves chromosome name, length and centromere metadata from a
-    BedTool object.
-    """
-    output = {
-        'accession': chromosome_id,
-    }
-
-    metadata = bt.filter(
-        lambda e: e[0] == chromosome_id
-    ).filter(
-        lambda e: e[2] == 'region' or e[2] == 'centromere'
-    )
-
-    for feat in metadata:
-        if feat[2] == 'region':
-            output['length'] = len(feat)
-            output['name'] = feat.attrs['Name']
-            output['type'] = ('nuclear' if feat.attrs['genome'] ==
-                              'chromosome' else 'mitochondrial')
-        elif feat[2] == 'centromere':
-            if 'Dbxref' in feat.attrs:
-                output['centromere'] = CentromereMeta(feat.start, len(feat))
-
-    return ChromosomeMeta(output['name'], output['type'],
-                          output['accession'], output['centromere'], [])
-
-
-def simulate_translocate(chromosome1: DNA, chromosome2: DNA, length1: int,
-                         length2: int, mode: int=0) -> Tuple[DNA, DNA]:
+def simulate_translocate(chromosome1: bytes, chromosome2: bytes, length1: int,
+                         length2: int, mode: int=0) -> Tuple[bytes, bytes]:
     """
     Simulate chromosomal translation. This is done by cutting some prefix or
     suffix from one chromosome and and this piece to an other chromosome,
@@ -72,29 +29,21 @@ def simulate_translocate(chromosome1: DNA, chromosome2: DNA, length1: int,
     """
 
     if mode == 0:
-        new_chromosome1 = DNA.concat([chromosome1[:-length1],
-                                      chromosome2[-length2:]])
-        new_chromosome2 = DNA.concat([chromosome2[:-length2],
-                                      chromosome1[-length1:]])
+        new_chromosome1 = chromosome1[:-length1] + chromosome2[-length2:]
+        new_chromosome2 = chromosome2[:-length2] + chromosome1[-length1:]
     elif mode == 1:
-        new_chromosome1 = DNA.concat([chromosome2[:length2],
-                                      chromosome1[length1:]])
-        new_chromosome2 = DNA.concat([chromosome1[:length1],
-                                      chromosome2[length2:]])
+        new_chromosome1 = chromosome2[:length2] + chromosome1[length1:]
+        new_chromosome2 = chromosome1[:length1] + chromosome2[length2:]
     elif mode == 2:
         # Get a suffix from chromosome 1, reverse it, and concatenate it
         # with a suffix of chromosome 2
-        new_chromosome1 = DNA.concat([
-            chromosome1[-length1:].reverse_complement(),
-            chromosome2[length2:]
-        ])
+        new_chromosome1 = (reverse_complement(chromosome1[-length1:]) +
+                           chromosome2[length2:])
 
         # Get a prefix of chromosome 1, and concatenate it with a reversed
         # prefix of chromosome 2
-        new_chromosome2 = DNA.concat([
-            chromosome1[:-length1],
-            chromosome2[:length2].reverse_complement()
-        ])
+        new_chromosome2 = (chromosome1[:-length1] +
+                           reverse_complement(chromosome2[:length2]))
     else:
         raise ValueError("Invalid mode '{}' specified. Possible values are 0, "
                          "1 or 2".format(mode))
@@ -102,7 +51,7 @@ def simulate_translocate(chromosome1: DNA, chromosome2: DNA, length1: int,
     return new_chromosome1, new_chromosome2
 
 
-def add_mutations(sequence: DNA, num: int) -> DNA:
+def add_mutations(sequence: bytearray, num: int) -> bytearray:
     """
     Randomly mutate a given DNA sequence.
 
@@ -110,32 +59,32 @@ def add_mutations(sequence: DNA, num: int) -> DNA:
     :param num: Number of mutations to apply.
     """
 
-    alphabet = {'A', 'C', 'T', 'G'}
-    new_sequence = sequence.copy(deep=True)
+    alphabet_lower = b'actg'
+    alphabet = b"ACTG"
 
     # Determine `num` random positions
     for pos in random.sample(range(len(sequence)), num):
-        base = str(sequence[pos])
+        base = sequence[pos]
 
-        new_base = random.choice(list(alphabet - {base}))
-        new_sequence = new_sequence.replace([pos], new_base)
+        base_index = alphabet_lower.find(base)
+        if base_index != -1:
+            base = alphabet[base_index]
 
-    return new_sequence
+        new_base = random.choice(list(set(alphabet) - {base}))
+        sequence[pos] = new_base
+
+    return sequence
 
 
-def generate_deletions(sequence: DNA, num: int, mu: int=20, std: float=6.0):
-    i = 0
-    new_sequence = sequence.copy(deep=True)
-
-    while i < num:
+def generate_deletions(sequence: bytearray, num: int, mu: int=20,
+                       std: float=6.0):
+    for i in range(num):
         size = int(round(numpy.random.normal(mu, std)))
-        pos = random.randint(0, len(new_sequence) - size)
+        pos = random.randint(0, len(sequence) - size)
 
-        new_sequence = DNA.concat([new_sequence[:pos],
-                                   new_sequence[pos+size:]])
-        i += 1
+        sequence = sequence[:pos] + sequence[pos+size:]
 
-    return new_sequence
+    return sequence
 
 
 def find_ty_element_location(annotations: pybedtools.BedTool, start_end=None):
