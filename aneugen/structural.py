@@ -51,31 +51,6 @@ def simulate_translocate(chromosome1: bytes, chromosome2: bytes, length1: int,
     return new_chromosome1, new_chromosome2
 
 
-def add_mutations(sequence: bytearray, num: int) -> bytearray:
-    """
-    Randomly mutate a given DNA sequence.
-
-    :param sequence: DNA sequence of the chromosome
-    :param num: Number of mutations to apply.
-    """
-
-    alphabet_lower = b'actg'
-    alphabet = b"ACTG"
-
-    # Determine `num` random positions
-    for pos in random.sample(range(len(sequence)), num):
-        base = sequence[pos]
-
-        base_index = alphabet_lower.find(base)
-        if base_index != -1:
-            base = alphabet[base_index]
-
-        new_base = random.choice(list(set(alphabet) - {base}))
-        sequence[pos] = new_base
-
-    return sequence
-
-
 def generate_deletions(sequence: bytearray, num: int, mu: int=20,
                        std: float=6.0):
     for i in range(num):

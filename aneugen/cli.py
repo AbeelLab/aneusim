@@ -1,17 +1,21 @@
-#!/usr/bin/env python3
-import argparse
-import logging
 import os
 import sys
+import json
+import logging
+import argparse
 from configparser import ConfigParser
 
 from dinopy import FastaReader, FastaWriter
 from pybedtools import BedTool
 
-from aneugen.chromosomes import (simulate_translocate, add_mutations,
-                                 generate_deletions, find_ty_element_location)
+from aneugen.structural import (simulate_translocate, generate_deletions,
+                                find_ty_element_location)
+from aneugen.haplogen import MutationGenerator, MutationType
+from aneugen.haplo_spec import get_distance_model, get_dosage
 from aneugen.reads import (ReadLengthDistribution, generate_reads,
                            read_reference)
+
+logger = logging.getLogger(__name__)
 
 
 #
@@ -31,38 +35,59 @@ def list_records(args):
     print(total_length/1000/1000, "Mbp")
 
 
-def haplotise(args):
+def haplogen(args):
     """Generate separate FASTA files for each chromosome copy."""
 
     if not os.path.isdir(args.output_dir):
         os.makedirs(args.output_dir, exists_ok=True)
 
-    copy_num_spec = ConfigParser()
-    copy_num_spec.read_file(args.spec_file)
-
-    copy_numbers = copy_num_spec['chromosomes']
+    haplotypes_spec = ConfigParser()
+    haplotypes_spec.read_file(args.spec_file)
 
     fr = FastaReader(args.input)
-    for c in fr.entries():
+    for c in fr.entries(dtype=bytearray):
         parts = c.name.decode('utf-8').split()
         chromosome_id = parts[0]
-        if chromosome_id in copy_numbers:
-            try:
-                copy_number = int(copy_numbers[chromosome_id])
-            except ValueError:
-                logging.error(
-                    "Invalid copy number value '{}' for chromosome "
-                    "'{}'".format(copy_numbers[chromosome_id], chromosome_id)
-                )
-                copy_number = 1
-        else:
-            logging.warning(
-                'No copy number specification found for '
-                'chromosome {}. Assuming a single copy.'.format(chromosome_id)
-            )
-            copy_number = 1
 
-        for i in range(copy_number):
+        if chromosome_id not in haplotypes_spec:
+            logger.warning("No specification on how to generate haplotypes "
+                           "for chromosome '{}', ignoring".format(
+                               chromosome_id))
+            continue
+
+        chromosome_spec = haplotypes_spec[chromosome_id]
+
+        if 'ploidy' not in chromosome_spec:
+            logger.error("No ploidy given for chromosome '{}', "
+                         "ignoring".format(chromosome_id))
+            continue
+
+        ploidy = chromosome_spec.getint('ploidy')
+        logger.info("Processing reference chromosome %s with ploidy %d",
+                    chromosome_id, ploidy)
+
+        # Obtain distance models
+        substitution_dist_model = get_distance_model(chromosome_spec,
+                                                     MutationType.SUBSTITUTION)
+        insertion_dist_model = get_distance_model(chromosome_spec,
+                                                  MutationType.INSERTION)
+        deletion_dist_model = get_distance_model(chromosome_spec,
+                                                 MutationType.DELETION)
+
+        # Get dosage distribution
+        dosage_dist = get_dosage(chromosome_spec)
+        biallelic = chromosome_spec.getboolean('biallelic', True)
+        ld_reassign_prob = chromosome_spec.getfloat('ld_reassign_prob', 0.4)
+
+        # TODO: allow for configuration of substitution and insertion rates
+        mut_gen = MutationGenerator(c.sequence, ploidy, dosage_dist,
+                                    biallelic=biallelic,
+                                    ld_reassign_prob=ld_reassign_prob)
+
+        haplotypes, mutation_record = mut_gen.generate(
+            substitution_dist_model, insertion_dist_model, deletion_dist_model)
+
+        for i, haplotype in enumerate(haplotypes):
             output_path = os.path.join(
                 args.output_dir,
                 "{}.copy{}.fasta".format(chromosome_id, i)
@@ -72,7 +97,15 @@ def haplotise(args):
                                               " ".join(parts[1:]))
 
             with FastaWriter(output_path, force_overwrite=True) as fw:
-                fw.write_chromosome((c.sequence, copy_name.encode('utf-8')))
+                fw.write_chromosome((haplotype, copy_name.encode('utf-8')),
+                                    dtype=bytearray)
+
+        if args.record_mutations:
+            output_file = os.path.join(
+                args.output_dir, "{}_mutations.json".format(chromosome_id))
+
+            with open(output_file, "w") as f:
+                json.dump(mutation_record.mutations, f, indent=2)
 
 
 def translocate(args):
@@ -133,18 +166,6 @@ def translocate(args):
         fw.write_chromosome((new2, chromosome2.name))
 
 
-def mutate(args):
-    filename = args.file.name
-    fr = FastaReader(args.file)
-    entry = next(fr.entries(dtype=bytearray))
-    new_sequence = add_mutations(entry.sequence, args.num)
-    args.file.close()
-
-    into_file = filename if args.in_place else args.output
-    with FastaWriter(into_file, force_overwrite=True) as fw:
-        fw.write_chromosome((new_sequence, entry.name), dtype=bytearray)
-
-
 def deletions(args):
     filename = args.file.name
 
@@ -185,22 +206,33 @@ def reads(args):
         print(num, "reads required for coverage of", args.coverage,
               file=sys.stderr)
 
+    metadata = {}
     with FastaWriter(args.output, force_overwrite=True) as fw:
         for i, read_data in enumerate(generate_reads(chromosomes, dist, num,
                                                      args.min_length)):
             read, chromosome_name, start_pos = read_data
             chromosome_id = chromosome_name.decode('utf-8').split()[0]
 
-            read_name = "read{} chromsosome={} pos={} length={}".format(
-                i, chromosome_id, start_pos, len(read))
+            read_name = "read{}".format(i)
+            metadata[read_name] = {
+                'chromosome': chromosome_id,
+                'start_pos': start_pos,
+                'len': len(read)
+            }
 
             fw.write_entry((read, read_name.encode('utf-8')))
 
+    if args.metadata:
+        json.dump(metadata, args.metadata)
+
 
 def main():
+    logging.basicConfig(level=logging.INFO)
+
     parser = argparse.ArgumentParser(
         description="A script to help generate synthetic aneuploid genomes."
     )
+    parser.set_defaults(func=None)
 
     subparsers = parser.add_subparsers()
 
@@ -214,26 +246,31 @@ def main():
         help="The FASTA file to read"
     )
 
-    haplotise_parser = subparsers.add_parser(
-        'haplotise',
+    haplogen_parser = subparsers.add_parser(
+        'haplogen',
         help="Generate individual FASTA files for each chromosome haplotype."
     )
 
-    haplotise_parser.set_defaults(func=haplotise)
-    haplotise_parser.add_argument(
-        '-i', '--input', type=argparse.FileType('rb'), required=True,
-        help="Base genome as FASTA file. "
+    haplogen_parser.set_defaults(func=haplogen)
+    haplogen_parser.add_argument(
+        'input', type=argparse.FileType('rb'),
+        help="Base reference genome as FASTA file. "
              "Each record should represent a chromosome."
     )
-    haplotise_parser.add_argument(
+    haplogen_parser.add_argument(
         '-s', '--spec-file', type=argparse.FileType('r'), required=True,
-        help="Copy number specification for each chromosome, formatted as an "
+        help="Haplotype specification for each chromosome, formatted as an "
              "INI file."
     )
-    haplotise_parser.add_argument(
+    haplogen_parser.add_argument(
         'output_dir',
         help="Specify the output directory where all FASTA files will be "
              "stored."
+    )
+    haplogen_parser.add_argument(
+        '-r', '--record-mutations', action="store_true", default=False,
+        help="Output an additional JSON file for each chromosome specifying "
+             "which mutations where made on each haplotype."
     )
 
     translocate_parser = subparsers.add_parser(
@@ -264,31 +301,6 @@ def main():
         help="Modify the chromosome fasta files in place. Otherwise output "
              "the modified chromosomes as new files in the same directory as "
              "the original files."
-    )
-
-    mutate_parser = subparsers.add_parser(
-        'mutate', help="Randomly add synthetic mutations to a chromosome."
-    )
-
-    mutate_parser.set_defaults(func=mutate)
-    mutate_parser.add_argument(
-        '-n', '--num', type=int, required=True,
-        help="Specify the number of mutations to generate."
-    )
-    mutate_parser.add_argument(
-        'file', type=argparse.FileType('rb'), default=sys.stdin,
-        help="The FASTA file with the chromosome sequence to read. Defaults "
-             "to stdin."
-    )
-    mutate_parser.add_argument(
-        '-o', '--output', type=argparse.FileType('wb'), default=sys.stdout,
-        required=False,
-        help="Output file of the new mutated chromosome, defaults to stdout."
-    )
-    mutate_parser.add_argument(
-        '-i', '--in-place', action="store_true", default=False,
-        help="Modify the file in place. Does not work if reading from stdin, "
-             "and supersedes the --output option."
     )
 
     deletions_parser = subparsers.add_parser(
@@ -354,7 +366,7 @@ def main():
 
     reads_parser.set_defaults(func=reads)
     reads_parser.add_argument(
-        '-l', '--lognorm-params', type=float,
+        '-ln', '--lognorm-params', type=float,
         default=(0.2001, -10075.4364, 17922.611), nargs=3,
         help="log-normal distribution parameters to sample read lengths from "
              " (sigma, loc, scale)."
@@ -370,8 +382,13 @@ def main():
              "parameter -n/--num"
     )
     reads_parser.add_argument(
-        '-m', '--min-length', type=int, default=100,
-        help="Minimum read length. Defaults to 100."
+        '-l', '--min-length', type=int, default=1000,
+        help="Minimum read length. Defaults to 1000."
+    )
+    reads_parser.add_argument(
+        '-m', '--metadata', type=argparse.FileType('w'), default=None,
+        required=False,
+        help="Specify the filename to output read metadata in JSON format."
     )
     reads_parser.add_argument(
         '-o', '--output', type=argparse.FileType('wb'), default=sys.stdout,
@@ -383,8 +400,7 @@ def main():
     )
 
     args = parser.parse_args()
-    args.func(args)
-
-
-if __name__ == '__main__':
-    main()
+    if not args.func:
+        parser.print_help()
+    else:
+        args.func(args)

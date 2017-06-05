@@ -26,7 +26,7 @@ setup(
     # Entry points
     entry_points={
         'console_scripts': [
-            'aneuploidgen = aneuploidgen:main'
+            'aneuploidgen = aneugen.cli:main'
         ]
     }
 )
