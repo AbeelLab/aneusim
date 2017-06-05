@@ -8,11 +8,11 @@ from configparser import ConfigParser
 from dinopy import FastaReader, FastaWriter
 from pybedtools import BedTool
 
-from aneugen.structural import (simulate_translocate, generate_deletions,
+from aneusim.structural import (simulate_translocate, generate_deletions,
                                 find_ty_element_location)
-from aneugen.haplogen import MutationGenerator, MutationType
-from aneugen.haplo_spec import get_distance_model, get_dosage
-from aneugen.reads import (ReadLengthDistribution, generate_reads,
+from aneusim.haplogen import MutationGenerator, MutationType
+from aneusim.haplo_spec import get_distance_model, get_dosage
+from aneusim.reads import (ReadLengthDistribution, generate_reads,
                            read_reference)
 
 logger = logging.getLogger(__name__)

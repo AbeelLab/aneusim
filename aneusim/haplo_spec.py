@@ -1,7 +1,7 @@
 import ast
 import operator as op
 
-from aneugen.haplogen import MutationType, SPEC_MUTTYPE_KEY, DISTANCE_MODELS
+from aneusim.haplogen import MutationType, SPEC_MUTTYPE_KEY, DISTANCE_MODELS
 
 # supported operators for math evaluation
 operators = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
