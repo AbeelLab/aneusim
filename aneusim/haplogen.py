@@ -174,6 +174,9 @@ class MutationGenerator:
                                                           mut_type,
                                                           deletion_size_model)
             for i in range(self.ploidy):
+                if i not in alt_assignment:
+                    continue
+
                 size = 0
                 if mut_type == MutationType.DELETION:
                     size = -ref_cursor_mov[i]
@@ -254,4 +257,4 @@ class MutationGenerator:
     def _get_insertion(self):
         index = nprnd.choice(len(INSERTION_ALPHABET), p=self.insertion_rates)
 
-        return INSERTION_ALPHABET[index]
+        return INSERTION_ALPHABET[index][0]
