@@ -1,6 +1,6 @@
 import pytest  # noqa
 
-from aneugen.structural import simulate_translocate, generate_deletions
+from aneusim.structural import simulate_translocate
 
 
 def test_translocation():
@@ -18,15 +18,3 @@ def test_translocation():
     new1, new2 = simulate_translocate(chromosome1, chromosome2, 4, 4, 2)
     assert new1 == b'AGGGACGGGGGA'
     assert new2 == b'GAAAAATGAAAG'
-
-
-def test_deletions():
-    sequence = b'AAAAAAAA'
-    mutated = generate_deletions(sequence, 1, 3, 0.1)
-
-    assert len(mutated) == len(sequence) - 3
-
-    sequence = b'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-    mutated = generate_deletions(sequence, 3, 3, 0.1)
-
-    assert len(mutated) == len(sequence) - 9
