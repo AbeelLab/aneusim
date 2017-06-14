@@ -1,9 +1,5 @@
-import random
 from typing import Tuple
-from collections.abc import Sequence
 
-import numpy
-import pybedtools
 from dinopy import reverse_complement
 
 
@@ -49,32 +45,3 @@ def simulate_translocate(chromosome1: bytes, chromosome2: bytes, length1: int,
                          "1 or 2".format(mode))
 
     return new_chromosome1, new_chromosome2
-
-
-def generate_deletions(sequence: bytearray, num: int, mu: int=20,
-                       std: float=6.0):
-    for i in range(num):
-        size = int(round(numpy.random.normal(mu, std)))
-        pos = random.randint(0, len(sequence) - size)
-
-        sequence = sequence[:pos] + sequence[pos+size:]
-
-    return sequence
-
-
-def find_ty_element_location(annotations: pybedtools.BedTool, start_end=None):
-    start, end = -1, -1
-
-    if isinstance(start_end, Sequence):
-        start, end = start_end
-    elif isinstance(start_end, int):
-        start = -1
-        end = start_end
-
-    if start > 0:
-        annotations = annotations.filter(lambda f: f.start >= start)
-
-    if end > 0:
-        annotations = annotations.filter(lambda f: f.stop <= end)
-
-    return annotations.filter(lambda f: f[2] == 'mobile_genetic_element')
