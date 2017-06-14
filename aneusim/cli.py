@@ -6,10 +6,8 @@ import argparse
 from configparser import ConfigParser
 
 from dinopy import FastaReader, FastaWriter
-from pybedtools import BedTool
 
-from aneusim.structural import (simulate_translocate, generate_deletions,
-                                find_ty_element_location)
+from aneusim.structural import simulate_translocate
 from aneusim.haplogen import MutationGenerator, MutationType
 from aneusim.haplo_spec import (get_distance_model, get_deletion_size_model,
                                 get_dosage)
@@ -171,31 +169,6 @@ def translocate(args):
         fw.write_chromosome((new2, chromosome2.name))
 
 
-def deletions(args):
-    filename = args.file.name
-
-    fr = FastaReader(args.file)
-    entry = next(fr.entries())
-    args.file.close()
-
-    sequence = generate_deletions(entry.sequence, args.num, args.mu,
-                                  args.sigma)
-
-    out_file = filename if args.in_place else args.output
-    with FastaWriter(out_file, force_overwrite=True) as fw:
-        fw.write_chromosome((sequence, entry.name))
-
-
-def find_ty_elems(args):
-    annotations = BedTool(args.annotations_file).filter(
-        lambda f: f[0] == args.chromosome
-    )
-
-    ty_elements = find_ty_element_location(annotations, (args.start, args.end))
-    for interval in ty_elements:
-        print(interval.start, interval.end)
-
-
 def reads(args):
     if not args.coverage and not args.num:
         print("No number of reads given.")
@@ -306,61 +279,6 @@ def main():
         help="Modify the chromosome fasta files in place. Otherwise output "
              "the modified chromosomes as new files in the same directory as "
              "the original files."
-    )
-
-    deletions_parser = subparsers.add_parser(
-        'deletions', help="Randomly generate deletions throughout the genome."
-    )
-
-    deletions_parser.set_defaults(func=deletions)
-    deletions_parser.add_argument(
-        '-u', '--mu', type=int, default=20,
-        help="Mean size of a deletion. Defaults to 20."
-    )
-    deletions_parser.add_argument(
-        '-s', '--sigma', type=float, default=6.0,
-        help="Standard deviation of the size of a deletion. Defaults to 6"
-    )
-    deletions_parser.add_argument(
-        '-n', '--num', type=int, required=True,
-        help="Total number of deletions to generate."
-    )
-    deletions_parser.add_argument(
-        'file', type=argparse.FileType('rb'), default=sys.stdin,
-        help="The FASTA file with the chromosome sequence to read. Defaults "
-             "to stdin."
-    )
-    deletions_parser.add_argument(
-        '-o', '--output', type=argparse.FileType('wb'), default=sys.stdout,
-        required=False,
-        help="Output file of the new mutated chromosome, defaults to stdout."
-    )
-    deletions_parser.add_argument(
-        '-i', '--in-place', action="store_true", default=False,
-        help="Modify the file in place. Does not work if reading from stdin, "
-             "and supersedes the --output option."
-    )
-
-    find_tyelems_parser = subparsers.add_parser(
-        'find_tyelems', help="Find the positions of Ty-elements in an "
-                             "chromosome."
-    )
-
-    find_tyelems_parser.set_defaults(func=find_ty_elems)
-    find_tyelems_parser.add_argument(
-        'annotations_file', help="BED or GFF file with genome annotations."
-    )
-    find_tyelems_parser.add_argument(
-        'chromosome', help="Specify chromosome ID"
-    )
-    find_tyelems_parser.add_argument(
-        '-s', '--start', type=int, default=-1,
-        help="Start position of the range to search in",
-
-    )
-    find_tyelems_parser.add_argument(
-        '-e', '--end', type=int, default=-1,
-        help="End position of the range to search in",
     )
 
     reads_parser = subparsers.add_parser(
