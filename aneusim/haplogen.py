@@ -13,10 +13,12 @@ import random
 from typing import List, Callable, Set, Mapping, Tuple
 from collections import defaultdict
 
-import numpy
 from numpy import random as nprnd
 
+from aneusim.models import FixedValueModel
+
 DistanceModelT = Callable[[], int]
+SizeModelT = Callable[[], int]
 DosageDistributionT = List[float]
 InsertionRatesT = List[float]
 SubstitutionRatesT = Mapping[bytes, Mapping[bytes, float]]
@@ -31,52 +33,24 @@ class MutationType(enum.Enum):
     SUBSTITUTION = 3
 
 
-SPEC_MUTTYPE_KEY = {
-    MutationType.SUBSTITUTION: "substitutions",
-    MutationType.INSERTION: "insertions",
-    MutationType.DELETION: "deletions"
-}
-
-
 class MutationRecord:
     def __init__(self, ploidy: int):
         self.ploidy = ploidy
         self.mutations = []
         for i in range(ploidy):
-            self.mutations.append({})
+            self.mutations.append([])
 
     def record(self, haplotype: int, ref_pos: int, haplo_pos: int,
-               alt_assignment: List[int], new_value: bytearray,
+               size: int, new_value: bytearray,
                mut_type: MutationType):
 
-        self.mutations[haplotype][haplo_pos] = {
+        self.mutations[haplotype].append({
             'ref_pos': ref_pos,
-            'alt_assignment': list(alt_assignment),
+            'haplo_pos': haplo_pos,
+            'size': size,
             'new_value': new_value.decode('ascii'),
             'mut_type': str(mut_type)
-        }
-
-
-class LogNormalDistanceModel:
-    def __init__(self, mean: float, sigma: float):
-        self.mean = mean
-        self.sigma = sigma
-
-    @classmethod
-    def from_spec(cls, chromosome_spec, mut_type: MutationType):
-        key = SPEC_MUTTYPE_KEY[mut_type]
-        mean_key = "{}.mean".format(key)
-        sigma_key = "{}.sigma".format(key)
-
-        if mean_key not in chromosome_spec or sigma_key not in chromosome_spec:
-            raise KeyError("Chromosome specification does not contain the "
-                           "parameters for the log-normal distribution.")
-
-        return cls(chromosome_spec.getfloat(mean_key),
-                   chromosome_spec.getfloat(sigma_key))
-
-    def __call__(self) -> int:
-        return int(numpy.round(nprnd.lognormal(self.mean, self.sigma, 1)))
+        })
 
 
 class MutationGenerator:
@@ -130,7 +104,9 @@ class MutationGenerator:
 
     def generate(self, substitution_dist_model: DistanceModelT=None,
                  insert_dist_model: DistanceModelT=None,
-                 deletion_dist_model: DistanceModelT=None) -> HaplotypeReturnT:
+                 deletion_dist_model: DistanceModelT=None,
+                 deletion_size_model: SizeModelT=None
+                 ) -> HaplotypeReturnT:
 
         # Merge all possible mutations by position
         all_mutations = defaultdict(list)
@@ -151,6 +127,9 @@ class MutationGenerator:
         if len(all_mutations) == 0:
             return [self.reference] * self.ploidy, MutationRecord(self.ploidy)
 
+        if not deletion_size_model:
+            deletion_size_model = FixedValueModel(1)
+
         # Generate the haplotypes, if there are multiple mutations possible,
         # randomly pick one
         haplotypes = []
@@ -158,7 +137,7 @@ class MutationGenerator:
         for i in range(self.ploidy):
             haplotypes.append(bytearray())
 
-        previous_pos = 0
+        ref_cursor = [0] * self.ploidy
         previous_alt_assignment = None
         for pos in sorted(all_mutations):
             mut_type, dosage = random.choice(all_mutations[pos])
@@ -185,32 +164,46 @@ class MutationGenerator:
 
             # Extend haplotypes up until pos
             for i in haplo_indices:
-                haplotypes[i].extend(self.reference[previous_pos:pos])
+                haplotypes[i].extend(self.reference[ref_cursor[i]:pos])
+
+                ref_cursor[i] += pos - ref_cursor[i]
 
             # Get the possibly additional bases corresponding to the current
             # mutation type
-            extra_bases = self._get_bases_for_mutation(pos, alt_assignment,
-                                                       mut_type)
+            extra_bases, ref_cursor_mov = self._do_mutate(pos, alt_assignment,
+                                                          mut_type,
+                                                          deletion_size_model)
             for i in range(self.ploidy):
-                mutation_record.record(i, pos, len(haplotypes[i]),
-                                       alt_assignment, extra_bases[i],
-                                       mut_type)
+                size = 0
+                if mut_type == MutationType.DELETION:
+                    size = -ref_cursor_mov[i]
+                elif mut_type == MutationType.INSERTION:
+                    size = 1
+                else:
+                    size = 0
+
+                mutation_record.record(i, pos, len(haplotypes[i]), size,
+                                       extra_bases[i], mut_type)
 
                 haplotypes[i].extend(extra_bases[i])
+                ref_cursor[i] += ref_cursor_mov[i]
 
             previous_alt_assignment = alt_assignment
 
-            # Reference base at `pos` already incorperated through
-            # `_get_bases_for_mutation`: therefore, increase pos with 1.
-            previous_pos = pos + 1
+        # Add the remaining part of the reference to the haplotypes
+        ref_len = len(self.reference)
+        for i in haplo_indices:
+            haplotypes[i].extend(self.reference[ref_cursor[i]:ref_len])
 
         return haplotypes, mutation_record
 
-    def _get_bases_for_mutation(self, pos: int, alt_assignment: Set[int],
-                                mut_type: MutationType):
-        bases = []
+    def _do_mutate(self, pos: int, alt_assignment: Set[int],
+                   mut_type: MutationType,
+                   deletion_size_model: SizeModelT):
+        extra_bases = []
+        ref_cursor_mov = [0] * self.ploidy
         for i in range(self.ploidy):
-            bases.append(bytearray())
+            extra_bases.append(bytearray())
 
         ref_base = self.reference[pos]
 
@@ -220,34 +213,36 @@ class MutationGenerator:
 
                 for i in range(self.ploidy):
                     if i in alt_assignment:
-                        bases[i].append(alt_base)
+                        extra_bases[i].append(alt_base)
                     else:
-                        bases[i].append(ref_base)
+                        extra_bases[i].append(ref_base)
             else:
                 for i in range(self.ploidy):
                     if i in alt_assignment:
                         alt_base = self._get_substitution(ref_base)
-                        bases[i].append(alt_base)
+                        extra_bases[i].append(alt_base)
                     else:
-                        bases[i].append(ref_base)
+                        extra_bases[i].append(ref_base)
+
+            for i in range(self.ploidy):
+                ref_cursor_mov[i] = 1
         elif mut_type == MutationType.INSERTION:
             if self.biallelic:
                 ins_base = self._get_insertion()
                 for i in alt_assignment:
-                    bases[i].append(ins_base)
+                    extra_bases[i].append(ins_base)
             else:
                 for i in alt_assignment:
                     ins_base = self._get_insertion()
-                    bases[i].append(ins_base)
+                    extra_bases[i].append(ins_base)
 
-            # It's an insertion, so add reference base to all haplotypes
-            for i in range(self.ploidy):
-                bases[i].append(ref_base)
+            # It's an insertion, so we don't need to move reference cursor
         elif mut_type == MutationType.DELETION:
+            deletion_size = deletion_size_model()
             for i in alt_assignment:
-                bases[i].append(ref_base)
+                ref_cursor_mov[i] = deletion_size
 
-        return bases
+        return extra_bases, ref_cursor_mov
 
     def _get_substitution(self, ref_base):
         possible_sub = list(self.substitution_rates[ref_base].keys())
@@ -260,8 +255,3 @@ class MutationGenerator:
         index = nprnd.choice(len(INSERTION_ALPHABET), p=self.insertion_rates)
 
         return INSERTION_ALPHABET[index]
-
-
-DISTANCE_MODELS = {
-    'lognormal': LogNormalDistanceModel
-}

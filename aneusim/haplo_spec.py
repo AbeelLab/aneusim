@@ -1,7 +1,8 @@
 import ast
 import operator as op
 
-from aneusim.haplogen import MutationType, SPEC_MUTTYPE_KEY, DISTANCE_MODELS
+from aneusim.haplogen import MutationType
+from aneusim.models import BaseModel, get_model
 
 # supported operators for math evaluation
 operators = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
@@ -38,27 +39,21 @@ def _math_eval(node):
         raise TypeError(node)
 
 
-def get_distance_model(chromosome_spec, mut_type: MutationType):
-    mut_type_key = SPEC_MUTTYPE_KEY[mut_type]
-    modelname_key = "{}.model".format(mut_type_key)
+SPEC_MUTTYPE_PREFIX = {
+    MutationType.SUBSTITUTION: "substitutions",
+    MutationType.INSERTION: "insertions",
+    MutationType.DELETION: "deletions"
+}
 
-    # First check if this mutation type is disabled by checking for boolean
-    # value
-    try:
-        modelname = chromosome_spec.getboolean(modelname_key)
-        if not modelname:
-            return None
-    except ValueError:
-        pass
 
-    # Otherwise try to get the actual distance model
-    modelname = chromosome_spec.get(modelname_key)
+def get_distance_model(chromosome_spec, mut_type: MutationType) -> BaseModel:
+    prefix = SPEC_MUTTYPE_PREFIX[mut_type]
 
-    if modelname not in DISTANCE_MODELS:
-        raise KeyError("Invalid distance model '{}'".format(modelname))
+    return get_model(chromosome_spec, prefix)
 
-    cls = DISTANCE_MODELS[modelname]
-    return cls.from_spec(chromosome_spec, mut_type)
+
+def get_deletion_size_model(chromosome_spec) -> BaseModel:
+    return get_model(chromosome_spec, "deletion_size")
 
 
 def get_dosage(chromosome_spec):

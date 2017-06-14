@@ -11,7 +11,8 @@ from pybedtools import BedTool
 from aneusim.structural import (simulate_translocate, generate_deletions,
                                 find_ty_element_location)
 from aneusim.haplogen import MutationGenerator, MutationType
-from aneusim.haplo_spec import get_distance_model, get_dosage
+from aneusim.haplo_spec import (get_distance_model, get_deletion_size_model,
+                                get_dosage)
 from aneusim.reads import (ReadLengthDistribution, generate_reads,
                            read_reference)
 
@@ -66,13 +67,15 @@ def haplogen(args):
         logger.info("Processing reference chromosome %s with ploidy %d",
                     chromosome_id, ploidy)
 
-        # Obtain distance models
+        # Obtain distance/size models
         substitution_dist_model = get_distance_model(chromosome_spec,
                                                      MutationType.SUBSTITUTION)
         insertion_dist_model = get_distance_model(chromosome_spec,
                                                   MutationType.INSERTION)
         deletion_dist_model = get_distance_model(chromosome_spec,
                                                  MutationType.DELETION)
+
+        deletion_size_model = get_deletion_size_model(chromosome_spec)
 
         # Get dosage distribution
         dosage_dist = get_dosage(chromosome_spec)
@@ -85,7 +88,9 @@ def haplogen(args):
                                     ld_reassign_prob=ld_reassign_prob)
 
         haplotypes, mutation_record = mut_gen.generate(
-            substitution_dist_model, insertion_dist_model, deletion_dist_model)
+            substitution_dist_model, insertion_dist_model, deletion_dist_model,
+            deletion_size_model
+        )
 
         for i, haplotype in enumerate(haplotypes):
             output_path = os.path.join(
