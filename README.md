@@ -72,25 +72,6 @@ TODO: document specification file.
                             Output an additional JSON file for each chromosome
                             specifying which mutations where made on each
                             haplotype.
-    usage: aneusim translocate [-h] [-m {0,1,2}] [-l LEN LEN] [-p POS POS] [-i]
-                               chromosome chromosome
-
-    positional arguments:
-      chromosome            Specify the two chromosomes as separate FASTA files.
-
-    optional arguments:
-      -h, --help            show this help message and exit
-      -m {0,1,2}, --mode {0,1,2}
-                            Choose translocation mode.
-      -l LEN LEN, --lengths LEN LEN
-                            Number of basepairs translocated for chromosome 1 and
-                            2 respectively.
-      -p POS POS, --pos POS POS
-                            Breaking positions for chromosome 1 and 2. Overrides
-                            the --lengths option.
-      -i, --in-place        Modify the chromosome fasta files in place. Otherwise
-                            output the modified chromosomes as new files in the
-                            same directory as the original files.
 
 ### `aneusim translocate` 
 
