@@ -1,4 +1,4 @@
 pytest
-numpy>=0.10
-pybedtools>=0.7
+numpy>=0.11
+scipy>=1.17
 dinopy>=1.2

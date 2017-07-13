@@ -14,9 +14,9 @@ setup(
 
     # Dependencies
     install_requires=[
+        'numpy',
         'scipy',
-        'dinopy>=0.2',
-        'pybedtools>=0.7'
+        'dinopy>=2.0',
     ],
     setup_requires=['pytest-runner'],
     tests_require=[
