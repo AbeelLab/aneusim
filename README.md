@@ -1,6 +1,9 @@
 `aneusim` - A tool to generate synthetic aneuploid/polyploid genomes
 ==================================================================
 
+[![Build 
+Status](https://travis-ci.org/lrvdijk/aneusim.svg?branch=master)](https://travis-ci.org/lrvdijk/aneusim)
+
 Using an existing (haploid) reference genome as base, this tools helps you to 
 build a synthetic aneuploid or polyploid genome derived from your reference. 
 This tool has features to generate random insertions, deletions and 
