@@ -1,4 +1,4 @@
 pytest
 numpy>=0.11
-scipy>=1.17
-dinopy>=1.2
+scipy>=0.17
+dinopy>=2.0
