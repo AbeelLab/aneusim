@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 
 import numpy
-import numpy.random
+from scipy.stats import lognorm, expon
 
 
 class BaseModel(metaclass=ABCMeta):
@@ -18,14 +18,18 @@ class BaseModel(metaclass=ABCMeta):
 
 
 class LogNormalModel(BaseModel):
-    def __init__(self, mean: float, sigma: float):
+    def __init__(self, mean: float, sigma: float, loc: float=0.0):
         self.mean = mean
         self.sigma = sigma
+        self.loc = loc
+
+        self.rv = lognorm(s=sigma, scale=numpy.exp(mean), loc=loc)
 
     @classmethod
     def from_spec(cls, chromosome_spec, prefix):
         mean_key = "{}.mean".format(prefix)
         sigma_key = "{}.sigma".format(prefix)
+        loc_key = "{}.loc".format(prefix)
 
         if mean_key not in chromosome_spec or sigma_key not in chromosome_spec:
             raise KeyError("Chromosome specification does not contain the "
@@ -33,16 +37,16 @@ class LogNormalModel(BaseModel):
                            " Keys checked: {}, {}".format(mean_key, sigma_key))
 
         return cls(chromosome_spec.getfloat(mean_key),
-                   chromosome_spec.getfloat(sigma_key))
+                   chromosome_spec.getfloat(sigma_key),
+                   chromosome_spec.getfloat(loc_key, 0.0))
 
     def __call__(self) -> int:
-        return int(numpy.round(numpy.random.lognormal(
-            self.mean, self.sigma, 1)))
+        return int(round(self.rv.rvs()))
 
 
 class ExponentialModel(BaseModel):
     def __init__(self, lambda_: float):
-        self.rate = lambda_
+        self.rv = expon(scale=1/lambda_)
 
     @classmethod
     def from_spec(cls, chromosome_spec, prefix):
@@ -56,7 +60,7 @@ class ExponentialModel(BaseModel):
         return cls(chromosome_spec.getfloat(rate_key))
 
     def __call__(self):
-        return int(numpy.round(numpy.random.exponential(1/self.rate)))
+        return int(round(self.rv.rvs()))
 
 
 class FixedValueModel(BaseModel):
