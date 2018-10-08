@@ -248,6 +248,9 @@ class MutationGenerator:
         return extra_bases, ref_cursor_mov
 
     def _get_substitution(self, ref_base):
+        if ref_base == b'N'[0]:
+            return ref_base
+
         possible_sub = list(self.substitution_rates[ref_base].keys())
         weights = list(self.substitution_rates[ref_base].values())
 

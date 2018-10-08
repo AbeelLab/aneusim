@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='aneusim',
-    version='0.4.0',
+    version='0.4.1',
     packages=find_packages(),
 
     # Metadata
@@ -10,7 +10,7 @@ setup(
     author='Lucas van Dijk',
     author_email='info@lucasvandijk.nl',
     license='MIT',
-    url='https://github.com/lrvdijk/aneusim',
+    url='https://github.com/AbeelLab/aneusim',
 
     # Dependencies
     install_requires=[
